@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Du Family Tree - Dynamic Knowledge Graph</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://unpkg.com/opencc-js/dist/umd/full.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #1e3c72, #2a5298); color: #fff; min-height: 100vh; overflow-x: hidden; }
+        .container { display: flex; flex-direction: column; height: 100vh; }
+        header { background: rgba(0,0,0,0.3); backdrop-filter: blur(10px); padding: 1rem 2rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; }
+        .logo { display: flex; align-items: center; gap: 1rem; }
+        .logo i { font-size: 2rem; color: #4fc3f7; }
+        .logo h1 { font-size: 1.5rem; }
+        .controls { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+        button { background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.2); color: white; padding: 0.5rem 1rem; border-radius: 30px; cursor: pointer; transition: all 0.3s; display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; }
+        button:hover { background: rgba(255,255,255,0.25); transform: translateY(-2px); }
+        .main-content { display: flex; flex: 1; padding: 1rem; gap: 1rem; overflow: hidden; }
+        .graph-container { flex: 1; background: rgba(255,255,255,0.05); border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); position: relative; overflow: hidden; }
+        #graph { width: 100%; height: 100%; }
+        .sidebar { width: 380px; background: rgba(255,255,255,0.05); border-radius: 20px; border: 1px solid rgba(255,255,255,0.1); padding: 1.5rem; overflow-y: auto; display: flex; flex-direction: column; gap: 1rem; }
+        .panel-title { font-size: 1.1rem; display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+        .form-group { margin-bottom: 0.8rem; }
+        .form-group label { display: block; font-size: 0.8rem; opacity: 0.7; margin-bottom: 0.3rem; }
+        .form-group input { width: 100%; padding: 0.5rem 0.8rem; border-radius: 10px; border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.1); color: white; font-size: 0.85rem; outline: none; }
+        .form-group input:focus { border-color: #4fc3f7; }
+        .form-row { display: flex; gap: 0.5rem; }
+        .form-row .form-group { flex: 1; }
+        .stats-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 0.5rem; }
+        .stat-card { background: rgba(255,255,255,0.1); border-radius: 12px; padding: 0.8rem; text-align: center; }
+        .stat-value { font-size: 1.5rem; font-weight: bold; color: #4fc3f7; }
+        .stat-label { font-size: 0.75rem; opacity: 0.7; }
+        .search-results { background: rgba(255,255,255,0.1); border-radius: 12px; padding: 0.8rem; max-height: 200px; overflow-y: auto; }
+        .search-results .result-item { padding: 0.4rem 0; border-bottom: 1px solid rgba(255,255,255,0.1); cursor: pointer; }
+        .search-results .result-item:hover { color: #4fc3f7; }
+        .search-results .result-item:last-child { border-bottom: none; }
+        .toast { position: fixed; bottom: 2rem; right: 2rem; background: #4fc3f7; color: #1e3c72; padding: 1rem 2rem; border-radius: 12px; font-weight: bold; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 100; max-width: 500px; font-size: 0.9rem; }
+        .toast.show { opacity: 1; }
+        @media (max-width: 900px) { .main-content { flex-direction: column; } .sidebar { width: 100%; } }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo"><i class="fas fa-project-diagram"></i><div><h1>Du Family Tree</h1><p style="font-size:0.75rem;opacity:0.7;margin-top:0.3rem;line-height:1.4;">锚定时空，以AI为笔、血脉为脉，留下你的坐标。也许我们无法亲手书写历史，但每一次记录与连接，都在为书写历史的人，提供来自这个时代最真实的材料。平凡者联结千人，名人照亮万众，伟人照亮亿万人——连接即是价值，让每一个名字，在千年之后仍被看见。</p></div></div>
+            <div class="controls">
+                <button id="resetBtn"><i class="fas fa-sync-alt"></i>Reset</button>
+                <button id="zoomInBtn"><i class="fas fa-search-plus"></i>Zoom In</button>
+                <button id="zoomOutBtn"><i class="fas fa-search-minus"></i>Zoom Out</button>
+                <button id="langToggleBtn"><i class="fas fa-language"></i>繁体</button>
+                <button id="syncBtn"><i class="fas fa-cloud-upload-alt"></i>同步</button>
+            </div>
+        </header>
+        <div class="main-content">
+            <div class="graph-container"><svg id="graph"></svg></div>
+            <div class="sidebar">
+                <div>
+                    <h2 class="panel-title"><i class="fas fa-user-plus"></i> Add Person</h2>
+                    <div class="form-group"><label>Name *</label><input id="inpName" placeholder="e.g. 杜文权"></div>
+                    <div class="form-row">
+                        <div class="form-group"><label>Birth</label><input id="inpBirth" placeholder="1982"></div>
+                        <div class="form-group"><label>Death</label><input id="inpDeath" placeholder="(optional)"></div>
+                    </div>
+                    <div class="form-group"><label>籍贯</label><input id="inpNative" placeholder="四川泸县"></div>
+                    <div class="form-row">
+                        <div class="form-group"><label>Parent IDs (focus here + click node)</label><input id="inpParent" placeholder="Click node to fill"></div>
+                        <div class="form-group"><label>Child IDs (focus here + click node)</label><input id="inpChild" placeholder="Click node to fill"></div>
+                    </div>
+                    <button id="addBtn" style="width:100%;justify-content:center;padding:0.7rem"><i class="fas fa-plus"></i>Add Person</button>
+                    <button id="modifyBtn" style="width:100%;justify-content:center;padding:0.7rem;background:rgba(79,195,247,0.2);border-color:rgba(79,195,247,0.4)"><i class="fas fa-edit"></i>Modify</button>
+                    <button id="cancelBtn" style="width:100%;justify-content:center;padding:0.7rem;background:rgba(255,107,107,0.2);border-color:rgba(255,107,107,0.4);display:none"><i class="fas fa-times"></i>Cancel</button>
+                </div>
+                <div>
+                    <h2 class="panel-title"><i class="fas fa-search"></i> Search</h2>
+                    <div class="form-group"><input id="searchInput" placeholder="Search by name..."></div>
+                    <div class="search-results" id="searchResults"></div>
+                </div>
+                <div>
+                    <h2 class="panel-title"><i class="fas fa-chart-bar"></i> Stats</h2>
+                    <div class="stats-grid">
+                        <div class="stat-card"><div class="stat-value" id="nodeCount">0</div><div class="stat-label">Members</div></div>
+                        <div class="stat-card"><div class="stat-value" id="edgeCount">0</div><div class="stat-label">Links</div></div>
+                        <div class="stat-card"><div class="stat-value" id="ancestorCount">0</div><div class="stat-label">Ancestors</div></div>
+                        <div class="stat-card"><div class="stat-value" id="densityValue">0%</div><div class="stat-label">Density</div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="toast" id="toast"></div>
+    <script>
+        let graphData = { nodes: [], links: [] };
+        let simulation, link, linkText, node, text, svg, width, height;
+        let activeField = null;
+        let editMode = false;
+        let editingPersonId = null;
+
+        let isTraditional = false;
+        let toTraditional, toSimplified;
+        try {
+            toTraditional = OpenCC.Converter({ from: 'cn', to: 'tw' });
+            toSimplified = OpenCC.Converter({ from: 'tw', to: 'cn' });
+        } catch (e) {
+            toTraditional = function(s) { return s; };
+            toSimplified = function(s) { return s; };
+        }
+
+        const langRegistry = [];
+        function registerLangElements() {
+            langRegistry.length = 0;
+            var subtitleP = document.querySelector('.logo p');
+            if (subtitleP) langRegistry.push({ el: subtitleP, type: 'text', orig: subtitleP.textContent });
+            var inpNative = document.getElementById('inpNative');
+            if (inpNative) {
+                var nativeLabel = inpNative.closest('.form-group').querySelector('label');
+                if (nativeLabel) langRegistry.push({ el: nativeLabel, type: 'text', orig: nativeLabel.textContent });
+            }
+            var inpName = document.getElementById('inpName');
+            if (inpName) langRegistry.push({ el: inpName, type: 'placeholder', orig: inpName.placeholder });
+            if (inpNative) langRegistry.push({ el: inpNative, type: 'placeholder', orig: inpNative.placeholder });
+        }
+
+        function applyLanguage(toTraditionalMode) {
+            var convert = toTraditionalMode ? toTraditional : toSimplified;
+            for (var i = 0; i < langRegistry.length; i++) {
+                var item = langRegistry[i];
+                var converted = convert(item.orig);
+                if (item.type === 'text') item.el.textContent = converted;
+                else if (item.type === 'placeholder') item.el.placeholder = converted;
+            }
+            if (typeof text !== 'undefined' && text) {
+                text.text(function(d) { return convert(d.label); });
+            }
+            document.getElementById('langToggleBtn').innerHTML =
+                '<i class="fas fa-language"></i>' + (toTraditionalMode ? '简体' : '繁体');
+            document.documentElement.lang = toTraditionalMode ? 'zh-TW' : 'zh-CN';
+            isTraditional = toTraditionalMode;
+        }
+
+        function convertElementText(el) {
+            var convert = isTraditional ? toTraditional : toSimplified;
+            var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+            var nodes = [];
+            while (walker.nextNode()) nodes.push(walker.currentNode);
+            for (var i = 0; i < nodes.length; i++) {
+                nodes[i].textContent = convert(nodes[i].textContent);
+            }
+        }
+
+        function toast(msg, duration) {
+            var t = document.getElementById('toast');
+            t.textContent = isTraditional ? toTraditional(msg) : msg;
+            t.classList.add('show');
+            setTimeout(function() { t.classList.remove('show'); }, duration || 2000);
+        }
+
+        const inpParent = document.getElementById('inpParent');
+        const inpChild = document.getElementById('inpChild');
+        inpParent.addEventListener('focus', () => activeField = 'parent');
+        inpChild.addEventListener('focus', () => activeField = 'child');
+        inpParent.addEventListener('blur', () => setTimeout(() => { if (activeField === 'parent') activeField = null; }, 200));
+        inpChild.addEventListener('blur', () => setTimeout(() => { if (activeField === 'child') activeField = null; }, 200));
+
+        document.getElementById('searchResults').addEventListener('mousedown', e => e.preventDefault());
+
+        function appendIdToField(field, id) {
+            const el = document.getElementById(field);
+            const cur = el.value.trim();
+            if (cur && !cur.endsWith(',')) el.value = cur + ',' + id;
+            else el.value = cur + id;
+        }
+
+        function focusNode(id) {
+            const target = graphData.nodes.find(n => n.id === id.toString());
+            if (!target) return;
+            const tx = width / 2 - target.x;
+            const ty = height / 2 - target.y;
+            svg.transition().duration(750).call(
+                d3.zoom().transform,
+                d3.zoomIdentity.translate(tx, ty).scale(2)
+            );
+            node.attr('stroke', d => d.id === id ? '#FFD700' : d.type === '伟人' || d.type === '名人' ? '#FFD70080' : '#fff')
+                .attr('stroke-width', d => d.id === id ? 5 : d.type === '伟人' || d.type === '名人' ? 3 : 2)
+                .attr('r', d => d.id === id ? d.size + 4 : d.size);
+            text.attr('font-size', d => d.id === id ? '16px' : '12px')
+                .attr('fill', d => d.id === id ? '#FFD700' : '#fff');
+            setTimeout(() => {
+                node.attr('stroke', d => d.type === '伟人' || d.type === '名人' ? '#FFD700' : '#fff')
+                    .attr('stroke-width', d => d.type === '伟人' || d.type === '名人' ? 3 : 2)
+                    .attr('r', d => d.size);
+                text.attr('font-size', '12px').attr('fill', '#fff');
+            }, 3000);
+        }
+
+        async function fetchGraph() {
+            const res = await fetch('/api/graph');
+            graphData = await res.json();
+            ancestorIds = new Set(graphData.nodes.filter(n => n.type === '伟人' || n.type === '名人').map(n => n.id));
+            graphData.links.forEach(l => { l.ancestorLink = ancestorIds.has(l.source) || ancestorIds.has(l.target); });
+            initGraph();
+            updateStats();
+        }
+
+        let ancestorIds = new Set();
+
+        function initGraph() {
+            d3.select('#graph').selectAll('*').remove();
+            svg = d3.select('#graph');
+            const rect = svg.node().getBoundingClientRect();
+            width = rect.width; height = rect.height;
+            svg.attr('viewBox', [0, 0, width, height]);
+
+            svg.append('defs').append('marker')
+                .attr('id', 'arrow').attr('viewBox', '0 -5 10 10')
+                .attr('refX', 10).attr('refY', 0)
+                .attr('markerWidth', 6).attr('markerHeight', 6)
+                .attr('orient', 'auto')
+                .append('path').attr('d', 'M0,-5L10,0L0,5').attr('fill', '#ffffff80');
+
+            svg.append('defs').append('marker')
+                .attr('id', 'arrow-ancestor').attr('viewBox', '0 -5 10 10')
+                .attr('refX', 10).attr('refY', 0)
+                .attr('markerWidth', 6).attr('markerHeight', 6)
+                .attr('orient', 'auto')
+                .append('path').attr('d', 'M0,-5L10,0L0,5').attr('fill', '#ffffff40');
+
+            simulation = d3.forceSimulation(graphData.nodes)
+                .force('link', d3.forceLink(graphData.links).id(d => d.id).distance(100))
+                .force('charge', d3.forceManyBody().strength(-300))
+                .force('center', d3.forceCenter(width / 2, height / 2))
+                .force('collision', d3.forceCollide().radius(d => d.size + 5));
+
+            link = svg.append('g').attr('class', 'links').selectAll('line')
+                .data(graphData.links).enter().append('line')
+                .attr('stroke', d => d.ancestorLink ? '#ffffff15' : '#ffffff30')
+                .attr('stroke-dasharray', d => d.ancestorLink ? '4,4' : null)
+                .attr('stroke-width', d => Math.sqrt(d.value))
+                .attr('marker-end', d => d.ancestorLink ? 'url(#arrow-ancestor)' : 'url(#arrow)')
+                .style('opacity', d => d.ancestorLink ? 0 : 1)
+                .style('pointer-events', d => d.ancestorLink ? 'none' : null);
+
+            linkText = svg.append('g').attr('class', 'link-text').selectAll('text')
+                .data(graphData.links).enter().append('text')
+                .attr('fill', d => d.ancestorLink ? 'transparent' : 'white')
+                .attr('font-size', '10px').attr('text-anchor', 'middle')
+                .style('pointer-events', 'none').text(d => d.label);
+
+            node = svg.append('g').attr('class', 'nodes').selectAll('circle')
+                .data(graphData.nodes).enter().append('circle')
+                .attr('r', d => d.size)
+                .attr('fill', d => {
+                    const map = { core: '#FF6B6B', spouse: '#4ECDC4', child: '#45B7D1', person: '#96CEB4', 伟人: '#FFD700', 名人: '#DDA0DD' };
+                    return map[d.type] || '#96CEB4';
+                })
+                .attr('stroke', d => d.type === '伟人' || d.type === '名人' ? '#FFD700' : '#fff')
+                .attr('stroke-width', d => d.type === '伟人' || d.type === '名人' ? 3 : 2)
+                .attr('stroke-dasharray', d => d.type === '伟人' || d.type === '名人' ? '4,3' : null)
+                .attr('cursor', d => d.type === '伟人' || d.type === '名人' ? 'pointer' : 'grab')
+                .call(d3.drag().on('start', (e,d) => { if (!e.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+                    .on('drag', (e,d) => { d.fx = e.x; d.fy = e.y; })
+                    .on('end', (e,d) => { if (!e.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; }));
+
+            text = svg.append('g').attr('class', 'labels').selectAll('text')
+                .data(graphData.nodes).enter().append('text')
+                .attr('dx', d => d.size + 5).attr('dy', '.35em')
+                .attr('fill', 'white').attr('font-size', '12px').text(d => d.label);
+
+            simulation.on('tick', () => {
+                link.attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+                    .attr('x2', d => { const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y, dist = Math.sqrt(dx*dx+dy*dy)||1; return d.target.x - (dx/dist)*(d.target.size+2); })
+                    .attr('y2', d => { const dx = d.target.x - d.source.x, dy = d.target.y - d.source.y, dist = Math.sqrt(dx*dx+dy*dy)||1; return d.target.y - (dy/dist)*(d.target.size+2); });
+                linkText.attr('x', d => (d.source.x + d.target.x) / 2).attr('y', d => (d.source.y + d.target.y) / 2);
+                node.attr('cx', d => d.x).attr('cy', d => d.y);
+                text.attr('x', d => d.x).attr('y', d => d.y);
+            });
+
+            svg.call(d3.zoom().extent([[0,0],[width,height]]).scaleExtent([0.1,8])
+                .on('zoom', e => svg.selectAll('g').attr('transform', e.transform)));
+
+            node.on('click', (event, d) => {
+                if (activeField === 'parent') {
+                    appendIdToField('inpParent', d.id);
+                    toast('Added ID ' + d.id + ' to Parent');
+                    return;
+                }
+                if (activeField === 'child') {
+                    appendIdToField('inpChild', d.id);
+                    toast('Added ID ' + d.id + ' to Child');
+                    return;
+                }
+                const parents = graphData.links.filter(l => l.target.id === d.id).map(l => l.source.label);
+                const children = graphData.links.filter(l => l.source.id === d.id).map(l => l.target.label);
+                const info = `ID: ${d.id} | ${d.label} | ${d.type} | Birth: ${d.birth_date||'?'} | Death: ${d.dead_date||'?'}`;
+                toast(info, 4000);
+                focusNode(d.id);
+            });
+            node.on('contextmenu', (event, d) => {
+                event.preventDefault();
+                if (d.type !== '伟人' && d.type !== '名人') return;
+                const connected = link.filter(l => l.source.id === d.id || l.target.id === d.id);
+                const connectedText = linkText.filter(l => l.source.id === d.id || l.target.id === d.id);
+                const hidden = connected.node() && connected.style('opacity') === '0';
+                connected.transition().duration(300).style('opacity', hidden ? 1 : 0).style('pointer-events', hidden ? null : 'none');
+                connectedText.transition().duration(300).attr('fill', hidden ? 'white' : 'transparent');
+            });
+
+            document.getElementById('resetBtn').onclick = () => simulation.alpha(1).restart();
+            document.getElementById('zoomInBtn').onclick = () => { const t = d3.zoomTransform(svg.node()); svg.transition().duration(300).call(d3.zoom().transform, t.scale(t.k*1.2)); };
+            document.getElementById('zoomOutBtn').onclick = () => { const t = d3.zoomTransform(svg.node()); svg.transition().duration(300).call(d3.zoom().transform, t.scale(t.k*0.8)); };
+            document.getElementById('langToggleBtn').onclick = function() { applyLanguage(!isTraditional); };
+            if (isTraditional) applyLanguage(true);
+        }
+
+        function updateStats() {
+            document.getElementById('nodeCount').textContent = graphData.nodes.length;
+            document.getElementById('edgeCount').textContent = graphData.links.length;
+            document.getElementById('ancestorCount').textContent = graphData.nodes.filter(n => n.type === '伟人' || n.type === '名人').length;
+            const total = graphData.nodes.length * (graphData.nodes.length - 1) / 2;
+            const d = total > 0 ? (graphData.links.length / total * 100).toFixed(1) : 0;
+            document.getElementById('densityValue').textContent = d + '%';
+        }
+
+        document.getElementById('addBtn').onclick = async () => {
+            const name = document.getElementById('inpName').value.trim();
+            if (!name) return toast('Name is required');
+            const parent = document.getElementById('inpParent').value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+            const children = document.getElementById('inpChild').value.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+            const body = {
+                name,
+                birth_date: document.getElementById('inpBirth').value.trim(),
+                dead_date: document.getElementById('inpDeath').value.trim(),
+                parent, children,
+                native_place: document.getElementById('inpNative').value.trim() || '四川泸县'
+            };
+            if (editMode) {
+                const res = await fetch('/api/persons/' + editingPersonId, {
+                    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+                });
+                if (res.ok) {
+                    const updated = await res.json();
+                    toast('Updated: ' + name + ' (ID:' + updated.id + ')');
+                    exitEditMode();
+                    await fetchGraph();
+                    setTimeout(() => focusNode(updated.id), 500);
+                } else {
+                    toast('Error updating person');
+                }
+            } else {
+                const res = await fetch('/api/persons', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+                });
+                if (res.ok) {
+                    const newPerson = await res.json();
+                    toast('Added: ' + name + ' (ID:' + newPerson.id + ')');
+                    document.getElementById('inpName').value = '';
+                    document.getElementById('inpBirth').value = '';
+                    document.getElementById('inpDeath').value = '';
+                    document.getElementById('inpParent').value = '';
+                    document.getElementById('inpChild').value = '';
+                    await fetchGraph();
+                    setTimeout(() => focusNode(newPerson.id), 500);
+                } else {
+                    toast('Error adding person');
+                }
+            }
+        };
+
+        let searchTimer;
+
+        document.getElementById('modifyBtn').onclick = async () => {
+            const name = document.getElementById('inpName').value.trim();
+            if (!name) return toast('Please enter a name to search for');
+            const res = await fetch('/api/persons/search?name=' + encodeURIComponent(name) + '&exact=true');
+            const matches = await res.json();
+            if (matches.length === 0) {
+                toast('No person found with exact name "' + name + '"');
+                return;
+            }
+            if (matches.length > 1) {
+                toast('Multiple people share the name "' + name + '". Cannot modify ambiguous match.');
+                return;
+            }
+            const person = matches[0];
+            editingPersonId = person.id;
+            editMode = true;
+            document.getElementById('inpName').value = person.name || '';
+            document.getElementById('inpBirth').value = person.birth_date || '';
+            document.getElementById('inpDeath').value = person.dead_date || '';
+            document.getElementById('inpNative').value = person.籍贯 || '';
+            document.getElementById('inpParent').value = (person.parent || []).join(', ');
+            document.getElementById('inpChild').value = (person.children || []).join(', ');
+            document.getElementById('addBtn').innerHTML = '<i class="fas fa-save"></i>Save Changes';
+            document.getElementById('addBtn').style.background = 'rgba(76,175,80,0.3)';
+            document.getElementById('addBtn').style.borderColor = 'rgba(76,175,80,0.5)';
+            document.getElementById('modifyBtn').style.display = 'none';
+            document.getElementById('cancelBtn').style.display = '';
+            toast('Editing: ' + person.name + ' (ID:' + person.id + ')', 3000);
+        };
+
+        document.getElementById('cancelBtn').onclick = () => {
+            exitEditMode();
+            toast('Edit cancelled');
+        };
+
+        function exitEditMode() {
+            editMode = false;
+            editingPersonId = null;
+            document.getElementById('inpName').value = '';
+            document.getElementById('inpBirth').value = '';
+            document.getElementById('inpDeath').value = '';
+            document.getElementById('inpNative').value = '';
+            document.getElementById('inpParent').value = '';
+            document.getElementById('inpChild').value = '';
+            document.getElementById('addBtn').innerHTML = '<i class="fas fa-plus"></i>Add Person';
+            document.getElementById('addBtn').style.background = '';
+            document.getElementById('addBtn').style.borderColor = '';
+            document.getElementById('modifyBtn').style.display = '';
+            document.getElementById('cancelBtn').style.display = 'none';
+        }
+        document.getElementById('searchInput').oninput = function() {
+            clearTimeout(searchTimer);
+            const q = this.value.trim();
+            if (!q) { document.getElementById('searchResults').innerHTML = ''; return; }
+            searchTimer = setTimeout(async () => {
+                const res = await fetch('/api/persons/search?name=' + encodeURIComponent(q));
+                const data = await res.json();
+                const div = document.getElementById('searchResults');
+                if (data.length === 0) { div.innerHTML = '<div style="opacity:0.5">No results</div>'; return; }
+                div.innerHTML = data.map(p =>
+                    `<div class="result-item" onclick="focusPerson(${p.id})">
+                        <i class="fas fa-user"></i> ${p.name}
+                        <span style="opacity:0.5;font-size:0.8rem"> (ID:${p.id}) (${p.birth_date||'?'})</span>
+                    </div>`
+                ).join('');
+                if (isTraditional) convertElementText(div);
+            }, 300);
+        };
+
+        async function focusPerson(id) {
+            if (activeField === 'parent') {
+                appendIdToField('inpParent', id);
+                toast('Added ID ' + id + ' to Parent');
+                return;
+            }
+            if (activeField === 'child') {
+                appendIdToField('inpChild', id);
+                toast('Added ID ' + id + ' to Child');
+                return;
+            }
+            const res = await fetch('/api/persons/' + id);
+            const p = await res.json();
+            if (p.error) return;
+            const parents = (p.parent || []).filter(x => x > 0).join(', ') || '?';
+            const children = (p.children || []).filter(x => x > 0).join(', ') || '?';
+            let info = `ID: ${p.id}\nName: ${p.name}\nBirth: ${p.birth_date || '?'}\nDeath: ${p.dead_date || '?'}\n籍贯: ${p.籍贯 || '?'}\nParents: ${parents}\nChildren: ${children}`;
+            if (p.detail) info += `\n\nDetail:\n${p.detail}`;
+            alert(isTraditional ? toTraditional(info) : info);
+            focusNode(id);
+        }
+
+        document.getElementById('syncBtn').onclick = async function() {
+            var btn = this;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>同步中...';
+            try {
+                var res = await fetch('/api/sync', { method: 'POST' });
+                var data = await res.json();
+                toast(data.success ? data.message : '同步失败: ' + data.message, 4000);
+            } catch (e) {
+                toast('同步失败: 无法连接服务器', 4000);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-cloud-upload-alt"></i>同步';
+            }
+        };
+
+        registerLangElements();
+        fetchGraph();
+    </script>
+</body>
+</html>
